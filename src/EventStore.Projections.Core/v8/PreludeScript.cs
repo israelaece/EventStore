@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.Threading;
 using EventStore.Common.Log;
-using EventStore.Projections.Core.Utils;
 
 namespace EventStore.Projections.Core.v8
 {
@@ -15,10 +14,10 @@ namespace EventStore.Projections.Core.v8
         private readonly List<CompiledScript> _modules = new List<CompiledScript>();
 
         private readonly Js1.LoadModuleDelegate _loadModuleDelegate;
-                                                // do not inline.  this delegate is required to be kept alive to be available to unmanaged code
+        // do not inline.  this delegate is required to be kept alive to be available to unmanaged code
 
         private readonly Js1.LogDelegate _logDelegate;
-                                         // a reference must be kept to make a delegate callable from unmanaged world
+        // a reference must be kept to make a delegate callable from unmanaged world
 
         private readonly Action<int, Action> _cancelCallbackFactory;
 
@@ -29,6 +28,8 @@ namespace EventStore.Projections.Core.v8
 
         private readonly Js1.EnterCancellableRegionDelegate _enterCancellableRegion;
         private readonly Js1.ExitCancellableRegionDelegate _exitCancellableRegion;
+
+        private readonly ILogger Log = LogManager.GetLoggerFor<QueryScript>();
 
         public PreludeScript(
             string script, string fileName, Func<string, Tuple<string, string>> getModuleSourceAndFileName,
@@ -64,6 +65,7 @@ namespace EventStore.Projections.Core.v8
                     }
                     catch (Js1Exception ex)
                     {
+                        Log.Fatal("Failed to Compile PreludeScript with {0},{1}", script, fileName);
                         if (attempts > 0 && (ex.ErrorCode == -1 || ex.ErrorCode == -2))
                         {
                             // timeouts
@@ -87,7 +89,7 @@ namespace EventStore.Projections.Core.v8
             if (_logger != null)
                 _logger(message, new object[] {});
             else
-                DebugLogger.Log(message);
+                _systemLogger.Info(message);
         }
 
         private IntPtr GetModule(string moduleName)
@@ -100,7 +102,15 @@ namespace EventStore.Projections.Core.v8
                     throw new InvalidOperationException("Requires scheduled terminate execution");
                 var compiledModuleHandle = Js1.CompileModule(
                     GetHandle(), moduleSourceAndFileName.Item1, moduleSourceAndFileName.Item2);
-                CompiledScript.CheckResult(compiledModuleHandle, terminated: false, disposeScriptOnException: true);
+                try
+                {
+                    CompiledScript.CheckResult(compiledModuleHandle, terminated: false, disposeScriptOnException: true);
+                }
+                catch (Exception ex)
+                {
+                    Log.Fatal("Failed to Compile Module PreludeScript with {0},{1}", moduleName, ex.Message);
+                    throw;
+                }
                 var compiledModule = new CompiledScript(compiledModuleHandle);
                 _modules.Add(compiledModule);
                 return compiledModuleHandle;

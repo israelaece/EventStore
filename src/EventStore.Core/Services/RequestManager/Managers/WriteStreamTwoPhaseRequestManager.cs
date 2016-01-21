@@ -2,6 +2,7 @@ using System;
 using EventStore.Core.Bus;
 using EventStore.Core.Messages;
 using EventStore.Core.Services.Storage.ReaderIndex;
+using EventStore.Common.Log;
 
 namespace EventStore.Core.Services.RequestManager.Managers
 {
@@ -9,6 +10,7 @@ namespace EventStore.Core.Services.RequestManager.Managers
                                                      IHandle<ClientMessage.WriteEvents>
     {
         private ClientMessage.WriteEvents _request;
+        protected static readonly ILogger Log = LogManager.GetLoggerFor<WriteStreamTwoPhaseRequestManager>();
 
         public WriteStreamTwoPhaseRequestManager(IPublisher publisher, 
                                                  int prepareCount, 

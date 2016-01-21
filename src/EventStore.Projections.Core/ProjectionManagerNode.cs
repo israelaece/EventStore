@@ -14,11 +14,13 @@ using EventStore.Projections.Core.Messaging;
 using EventStore.Projections.Core.Services.Http;
 using EventStore.Projections.Core.Services.Management;
 using EventStore.Projections.Core.Services.Processing;
+using EventStore.Common.Log;
 
 namespace EventStore.Projections.Core
 {
     public class ProjectionManagerNode
     {
+        private static readonly ILogger _logger = LogManager.GetLoggerFor<ProjectionManagerNode>();
         public static void CreateManagerService(
             StandardComponents standardComponents,
             ProjectionsStandardComponents projectionsStandardComponents,
@@ -74,6 +76,7 @@ namespace EventStore.Projections.Core
             ProjectionManagerCommandWriter projectionManagerCommadnWriter)
         {
             mainBus.Subscribe<SystemMessage.StateChangeMessage>(projectionManager);
+            mainBus.Subscribe<SystemMessage.SystemReady>(projectionManager);
             if (runProjections >= ProjectionType.System)
             {
                 mainBus.Subscribe<ProjectionManagementMessage.Command.Post>(projectionManager);
@@ -150,9 +153,10 @@ namespace EventStore.Projections.Core
                 Forwarder.Create<AwakeServiceMessage.UnsubscribeAwake>(standardComponents.MainQueue));
 
             // self forward all
-
             standardComponents.MainBus.Subscribe(
                 Forwarder.Create<SystemMessage.StateChangeMessage>(projectionsStandardComponents.MasterInputQueue));
+            standardComponents.MainBus.Subscribe(
+                Forwarder.Create<SystemMessage.SystemReady>(projectionsStandardComponents.MasterInputQueue));
             projectionsStandardComponents.MasterMainBus.Subscribe(new UnwrapEnvelopeHandler());
         }
     }

@@ -1,3 +1,4 @@
+using EventStore.Common.Log;
 using EventStore.Core.Bus;
 using EventStore.Core.Messages;
 using EventStore.Projections.Core.Messaging;
@@ -13,6 +14,7 @@ namespace EventStore.Projections.Core.Services.Processing
     {
         private readonly IPublisher _externalRequestQueue;
         private readonly IPublisher _inputQueue;
+        protected static readonly ILogger Log = LogManager.GetLoggerFor<RequestResponseQueueForwarder>();
 
         public RequestResponseQueueForwarder(IPublisher inputQueue, IPublisher externalRequestQueue)
         {

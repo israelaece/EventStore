@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using EventStore.Common.Utils;
 using EventStore.Core.Bus;
 using EventStore.Core.Data;
@@ -9,13 +8,15 @@ using EventStore.Core.Services.UserManagement;
 using EventStore.Projections.Core.Messages.ParallelQueryProcessingMessages;
 using EventStore.Projections.Core.Messages.Persisted.Responses.Slave;
 using EventStore.Projections.Core.Services.Processing;
-using EventStore.Projections.Core.Utils;
 using ResolvedEvent = EventStore.Core.Data.ResolvedEvent;
+using EventStore.Common.Log;
 
 namespace EventStore.Projections.Core.Services.Management
 {
     public class MasterCoreProjectionResponseReader
     {
+        private readonly ILogger _logger = LogManager.GetLoggerFor<MasterCoreProjectionResponseReader>();
+
         private readonly IPublisher _publisher;
         private readonly IODispatcher _ioDispatcher;
         private readonly Guid _workerId;
@@ -74,7 +75,7 @@ namespace EventStore.Projections.Core.Services.Management
                 var subscribeFrom = default(TFPos);
                 do
                 {
-                    DebugLogger.Log("Reading " + _streamId);
+                    _logger.Info("Reading " + _streamId);
                     yield return
                         _ioDispatcher.BeginReadForward(
                             _cancellationScope,
@@ -85,7 +86,7 @@ namespace EventStore.Projections.Core.Services.Management
                             SystemAccount.Principal,
                             completed =>
                             {
-                                DebugLogger.Log(_streamId + " read completed: " + completed.Result);
+                                _logger.Info(_streamId + " read completed: " + completed.Result);
                                 if (completed.Result == ReadStreamResult.Success
                                     || completed.Result == ReadStreamResult.NoStream)
                                 {
@@ -102,15 +103,15 @@ namespace EventStore.Projections.Core.Services.Management
                                     }
                                 }
                                 else
-                                    DebugLogger.Log(_streamId + " read completed: " + completed.Result);
+                                    _logger.Info(_streamId + " read completed: " + completed.Result);
                             });
                 } while (!eof);
-                DebugLogger.Log("Awaiting " + _streamId);
+                _logger.Info("Awaiting " + _streamId);
                 _lastAwakeCorrelationId = Guid.NewGuid();
                 yield return
                     _ioDispatcher.BeginSubscribeAwake(_cancellationScope, _streamId, subscribeFrom, message => { }, _lastAwakeCorrelationId)
                     ;
-                DebugLogger.Log(_streamId + " await completed");
+                _logger.Info(_streamId + " await completed");
             }
             // unlikely we can ever get here, but still possible - do nothing
         }
@@ -118,7 +119,7 @@ namespace EventStore.Projections.Core.Services.Management
         private void PublishCommand(ResolvedEvent resolvedEvent)
         {
             var command = resolvedEvent.Event.EventType;
-            DebugLogger.Log("Response received: " + command);
+            _logger.Info("Response received: " + command);
             switch (command)
             {
                 case "$measured":

@@ -6,13 +6,14 @@ using EventStore.Core.Messages;
 using EventStore.Core.Messaging;
 using EventStore.Core.Services.TimerService;
 using EventStore.Projections.Core.Messages;
-using EventStore.Projections.Core.Utils;
+using EventStore.Common.Log;
 
 namespace EventStore.Projections.Core.Services.Management
 {
     public class ProjectionCoreCoordinator
         : IHandle<ProjectionManagementMessage.Internal.RegularTimeout>, IHandle<SystemMessage.StateChangeMessage>
     {
+        private readonly ILogger _logger = LogManager.GetLoggerFor<ProjectionCoreCoordinator>();
         private readonly ProjectionType _runProjections;
         private readonly TimeoutScheduler[] _timeoutSchedulers;
         private readonly IPublisher[] _queues;
@@ -44,16 +45,13 @@ namespace EventStore.Projections.Core.Services.Management
 
         public void Handle(SystemMessage.StateChangeMessage message)
         {
-            DebugLogger.Log();
-            DebugLogger.Log();
-            DebugLogger.Log();
-            DebugLogger.Log("=======================" + message.State + "================");
-            if (message.State == VNodeState.Master // || message.State == VNodeState.Clone
+            _logger.Info("=======================" + message.State + "================");
+            if (message.State == VNodeState.Master
                 || message.State == VNodeState.Slave)
             {
                 if (!_started)
                 {
-                    DebugLogger.Log("*** STARTING PROJECTION CORE ***");
+                    _logger.Info("*** STARTING PROJECTION CORE ***");
                     Start();
                 }
             }
@@ -61,7 +59,7 @@ namespace EventStore.Projections.Core.Services.Management
             {
                 if (_started)
                 {
-                    DebugLogger.Log("*** STOPPING PROJECTION CORE ***");
+                    _logger.Info("*** STOPPING PROJECTION CORE ***");
                     Stop();
                 }
             }

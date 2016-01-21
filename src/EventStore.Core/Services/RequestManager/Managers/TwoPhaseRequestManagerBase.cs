@@ -27,6 +27,7 @@ namespace EventStore.Core.Services.RequestManager.Managers
         protected readonly IEnvelope PublishEnvelope;
         protected IEnvelope ResponseEnvelope { get { return _responseEnvelope; } }
         protected Guid ClientCorrId { get { return _clientCorrId; } }
+        protected Guid InternalCorrelationId { get { return _internalCorrId; } }
         protected DateTime NextTimeoutTime { get { return _nextTimeoutTime; } }
 
         protected readonly TimeSpan PrepareTimeout;

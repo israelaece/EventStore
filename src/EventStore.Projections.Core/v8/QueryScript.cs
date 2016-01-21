@@ -2,14 +2,15 @@ using System;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using EventStore.Common.Utils;
-using EventStore.Core.Util;
 using EventStore.Projections.Core.Messages;
-using EventStore.Projections.Core.Utils;
+using System.Threading;
+using EventStore.Common.Log;
 
 namespace EventStore.Projections.Core.v8
 {
     public class QueryScript : IDisposable
     {
+        private readonly ILogger _logger = LogManager.GetLoggerFor<QueryScript>();
         private readonly PreludeScript _prelude;
         private readonly CompiledScript _script;
         private readonly Dictionary<string, IntPtr> _registeredHandlers = new Dictionary<string, IntPtr>();
@@ -55,12 +56,40 @@ namespace EventStore.Projections.Core.v8
 
         private CompiledScript CompileScript(PreludeScript prelude, string script, string fileName)
         {
-            prelude.ScheduleTerminateExecution();
-            IntPtr query = Js1.CompileQuery(
-                prelude.GetHandle(), script, fileName, _commandHandlerRegisteredCallback, _reverseCommandHandlerDelegate);
-            var terminated = prelude.CancelTerminateExecution();
-            CompiledScript.CheckResult(query, terminated, disposeScriptOnException: true);
-            return new CompiledScript(query);
+            try
+            {
+                var attempts = 3;
+                var query = default(IntPtr);
+                do
+                {
+                    attempts--;
+                    try
+                    {
+                        prelude.ScheduleTerminateExecution();
+                        query = Js1.CompileQuery(
+                            prelude.GetHandle(), script, fileName, _commandHandlerRegisteredCallback, _reverseCommandHandlerDelegate);
+                        var terminated = prelude.CancelTerminateExecution();
+                        CompiledScript.CheckResult(query, terminated, disposeScriptOnException: true);
+                    }
+                    catch (Js1Exception ex)
+                    {
+                        _logger.Fatal("Failed to Compile QueryScript {0}, Number of attempts {1}\n", ex.Message, attempts);
+                        if (attempts > 0 && (ex.ErrorCode == -1 || ex.ErrorCode == -2))
+                        {
+                            // timeouts
+                            Thread.Sleep(2000);
+                        }
+                        else throw;
+                    }
+                } while (query == default(IntPtr));
+                return new CompiledScript(query);
+            }
+            catch (DllNotFoundException ex)
+            {
+                throw new ApplicationException(
+                    "The projection subsystem failed to load a libjs1.so/js1.dll/... or one of its dependencies.  The original error message is: "
+                    + ex.Message, ex);
+            }
         }
 
         private void ReverseCommandHandler(string commandName, string commandBody)
@@ -73,7 +102,7 @@ namespace EventStore.Projections.Core.v8
                         DoEmit(commandBody);
                         break;
                     default:
-                        DebugLogger.Log("Ignoring unknown reverse command: '{0}'", commandName);
+                        _logger.Info("Ignoring unknown reverse command: '{0}'", commandName);
                         break;
                 }
             }
@@ -134,7 +163,7 @@ namespace EventStore.Projections.Core.v8
                     // ignore - browser based debugging only
                     break;
                 default:
-                    DebugLogger.Log(
+                    _logger.Info(
                         string.Format("Unknown command handler registered. Command name: {0}", commandName));
                     break;
             }
@@ -178,7 +207,17 @@ namespace EventStore.Projections.Core.v8
 
             var terminated = _prelude.CancelTerminateExecution();
             if (!success)
-                CompiledScript.CheckResult(_script.GetHandle(), terminated, disposeScriptOnException: false);
+            {
+                try
+                {
+                    CompiledScript.CheckResult(_script.GetHandle(), terminated, disposeScriptOnException: false);
+                }
+                catch
+                {
+                    _logger.Fatal("Failed to Execute Handler for QueryScript with {0}, {1}", json, other == null ? "<none>" : String.Join(",", other));
+                    throw;
+                }
+            }
             string resultJson = Marshal.PtrToStringUni(resultJsonPtr);
             string result2Json = Marshal.PtrToStringUni(result2JsonPtr);
             Js1.FreeResult(memoryHandle);

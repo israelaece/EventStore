@@ -207,20 +207,15 @@ namespace EventStore.Core.Services.UserManagement
                         {
                             if (completed.Result == ReadStreamResult.NoStream)
                                 CreateAdminUser();
-                            else
-                                NotifyInitialized();
                         });
                 BeginReadUserDetails(
                     "ops", completed =>
                         {
                             if (completed.Result == ReadStreamResult.NoStream)
                                 CreateOperationsUser();
-                            else
-                                NotifyInitialized();
                         });
             }
-            else
-                NotifyInitialized();
+            NotifyInitialized();
         }
 
         private void NotifyInitialized()
@@ -525,7 +520,6 @@ namespace EventStore.Core.Services.UserManagement
                             break;
                         default:
                             _log.Error("'admin' user account could not be created");
-                            NotifyInitialized();
                             break;
                         case OperationResult.Success:
                             WriteUserEvent(
@@ -545,7 +539,6 @@ namespace EventStore.Core.Services.UserManagement
                                                         {
                                                             _log.Error(string.Format("unable to add 'admin' to $users. {0}", x.Result));
                                                         }
-                                                        NotifyInitialized();
                                                     });
                                                 break;
                                             case OperationResult.CommitTimeout:
@@ -555,7 +548,6 @@ namespace EventStore.Core.Services.UserManagement
                                                 break;
                                             default:
                                                 _log.Error("'admin' user account could not be created.");
-                                                NotifyInitialized();
                                                 break;
                                         }
                                     });
@@ -580,7 +572,6 @@ namespace EventStore.Core.Services.UserManagement
                             break;
                         default:
                             _log.Error("'ops' user account could not be created");
-                            NotifyInitialized();
                             break;
                         case OperationResult.Success:
                             WriteUserEvent(
@@ -600,7 +591,6 @@ namespace EventStore.Core.Services.UserManagement
                                                         {
                                                             _log.Error(string.Format("unable to add 'ops' to $users. {0}", x.Result));
                                                         }
-                                                        NotifyInitialized();
                                                     });
                                                 break;
                                             case OperationResult.CommitTimeout:
@@ -610,7 +600,6 @@ namespace EventStore.Core.Services.UserManagement
                                                 break;
                                             default:
                                                 _log.Error("'ops' user account could not be created.");
-                                                NotifyInitialized();
                                                 break;
                                         }
                                     });

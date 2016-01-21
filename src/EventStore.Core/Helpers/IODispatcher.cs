@@ -7,6 +7,7 @@ using EventStore.Core.Messaging;
 using EventStore.Core.Services;
 using EventStore.Core.Services.AwakeReaderService;
 using EventStore.Core.Services.TimerService;
+using EventStore.Common.Log;
 
 namespace EventStore.Core.Helpers
 {
@@ -15,6 +16,7 @@ namespace EventStore.Core.Helpers
         private readonly Guid _selfId = Guid.NewGuid();
         private readonly IPublisher _publisher;
         private readonly IEnvelope _inputQueueEnvelope;
+        private static readonly ILogger Log = LogManager.GetLoggerFor<IODispatcher>();
 
         public readonly
             RequestResponseDispatcher

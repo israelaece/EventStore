@@ -12,6 +12,7 @@ using EventStore.Core.Services.Monitoring.Stats;
 using EventStore.Core.Services.Monitoring.Utils;
 using EventStore.Core.Services.UserManagement;
 using EventStore.Core.TransactionLog.Checkpoint;
+using EventStore.Core.Helpers;
 
 namespace EventStore.Core.Services.Monitoring
 {
@@ -54,6 +55,7 @@ namespace EventStore.Core.Services.Monitoring
         private readonly string _nodeStatsStream;
         private bool _statsStreamCreated;
         private Guid _streamMetadataWriteCorrId;
+        private IODispatcher _ioDispatcher;
 
         public MonitoringService(IQueuedHandler monitoringQueue,
                                  IPublisher statsCollectionBus,
@@ -62,7 +64,8 @@ namespace EventStore.Core.Services.Monitoring
                                  string dbPath,
                                  TimeSpan statsCollectionPeriod,
                                  IPEndPoint nodeEndpoint,
-                                 StatsStorage statsStorage)
+                                 StatsStorage statsStorage,
+                                 IODispatcher ioDispatcher)
         {
             Ensure.NotNull(monitoringQueue, "monitoringQueue");
             Ensure.NotNull(statsCollectionBus, "statsCollectionBus");
@@ -70,6 +73,7 @@ namespace EventStore.Core.Services.Monitoring
             Ensure.NotNull(writerCheckpoint, "writerCheckpoint");
             Ensure.NotNullOrEmpty(dbPath, "dbPath");
             Ensure.NotNull(nodeEndpoint, "nodeEndpoint");
+            Ensure.NotNull(ioDispatcher, "ioDispatcher");
 
             _monitoringQueue = monitoringQueue;
             _statsCollectionBus = statsCollectionBus;
@@ -80,6 +84,7 @@ namespace EventStore.Core.Services.Monitoring
             _statsCollectionPeriodMs = statsCollectionPeriod > TimeSpan.Zero ? (long)statsCollectionPeriod.TotalMilliseconds : Timeout.Infinite;
             _nodeStatsStream = string.Format("{0}-{1}", SystemStreams.StatsStreamPrefix, nodeEndpoint);
             _timer = new Timer(OnTimerTick, null, Timeout.Infinite, Timeout.Infinite);
+            _ioDispatcher = ioDispatcher;
         }
 
         public void Handle(SystemMessage.SystemInit message)
@@ -155,9 +160,7 @@ namespace EventStore.Core.Services.Monitoring
             var data = rawStats.ToJsonBytes();
             var evnt = new Event(Guid.NewGuid(), SystemEventTypes.StatsCollection, true, data, null);
             var corrId = Guid.NewGuid();
-            var msg = new ClientMessage.WriteEvents(corrId, corrId, NoopEnvelope, false, _nodeStatsStream, 
-                                                    ExpectedVersion.Any, new[]{evnt}, SystemAccount.Principal);
-            _mainBus.Publish(msg);
+            _ioDispatcher.WriteEvent(_nodeStatsStream, ExpectedVersion.Any, evnt, SystemAccount.Principal, (_) => { });
         }
 
         public void Handle(SystemMessage.StateChangeMessage message)
@@ -204,12 +207,12 @@ namespace EventStore.Core.Services.Monitoring
         {
             var metadata = Helper.UTF8NoBom.GetBytes(StreamMetadata);
             _streamMetadataWriteCorrId = Guid.NewGuid();
-            _mainBus.Publish(
-                new ClientMessage.WriteEvents(
-                    _streamMetadataWriteCorrId, _streamMetadataWriteCorrId, new PublishEnvelope(_monitoringQueue),
-                    false, SystemStreams.MetastreamOf(_nodeStatsStream), ExpectedVersion.NoStream,
-                    new[]{new Event(Guid.NewGuid(), SystemEventTypes.StreamMetadata, true, metadata, null)},
-                    SystemAccount.Principal));
+
+            _streamMetadataWriteCorrId = _ioDispatcher.WriteEvent(SystemStreams.MetastreamOf(_nodeStatsStream), 
+                                                                  ExpectedVersion.NoStream, 
+                                                                  new Event(Guid.NewGuid(), SystemEventTypes.StreamMetadata, true, metadata, null), 
+                                                                  SystemAccount.Principal,
+                                                                  Handle);
         }
 
         public void Handle(ClientMessage.WriteEventsCompleted message)

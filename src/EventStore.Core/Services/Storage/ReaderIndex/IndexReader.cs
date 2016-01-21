@@ -8,6 +8,7 @@ using EventStore.Core.Index;
 using EventStore.Core.Index.Hashes;
 using EventStore.Core.TransactionLog;
 using EventStore.Core.TransactionLog.LogRecords;
+using EventStore.Common.Log;
 
 namespace EventStore.Core.Services.Storage.ReaderIndex
 {
@@ -47,6 +48,7 @@ namespace EventStore.Core.Services.Storage.ReaderIndex
         private long _hashCollisions;
         private long _cachedStreamInfo;
         private long _notCachedStreamInfo;
+        protected static readonly ILogger Log = LogManager.GetLoggerFor<IndexReader>();
 
         public IndexReader(IIndexBackend backend, IHasher hasher, ITableIndex tableIndex, StreamMetadata metastreamMetadata)
         {
@@ -296,7 +298,6 @@ namespace EventStore.Core.Services.Storage.ReaderIndex
                         throw new ArgumentOutOfRangeException("streamAccessType");
                 }
             }
-
             if ((streamAccessType == StreamAccessType.Write || streamAccessType == StreamAccessType.Delete)
                 && streamId == SystemStreams.AllStream)
                 return new StreamAccess(false);
@@ -330,13 +331,24 @@ namespace EventStore.Core.Services.Storage.ReaderIndex
             }
 
             var isPublic = roles.Contains(x => x == SystemRoles.All);
-            if (isPublic) return new StreamAccess(true, true);
-            if (user == null) return new StreamAccess(false);
-            if (user.IsInRole(SystemRoles.Admins)) return new StreamAccess(true);
+            if (isPublic)
+            {
+              return new StreamAccess(true, true);
+            }
+            if (user == null)
+            {
+              return new StreamAccess(false);
+            }
+            if (user.IsInRole(SystemRoles.Admins))
+            {
+              return new StreamAccess(true);
+            }
             for (int i = 0; i < roles.Length; ++i)
             {
                 if (user.IsInRole(roles[i]))
+                {
                     return new StreamAccess(true);
+                }
             }
             return new StreamAccess(false);
         }

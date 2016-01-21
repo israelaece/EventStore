@@ -38,7 +38,7 @@ using EventStore.Core.Services.PersistentSubscription.ConsumerStrategy;
 
 namespace EventStore.Core
 {
-    public class ClusterVNode : IHandle<SystemMessage.StateChangeMessage>, IHandle<SystemMessage.BecomeShutdown>
+    public class ClusterVNode : IHandle<SystemMessage.StateChangeMessage>, IHandle<SystemMessage.BecomeShutdown>, IHandle<UserManagementMessage.UserManagementServiceInitialized>
     {
         private static readonly ILogger Log = LogManager.GetLoggerFor<ClusterVNode>();
 
@@ -113,14 +113,16 @@ namespace EventStore.Core
 
             _controller = new ClusterVNodeController((IPublisher)_mainBus, _nodeInfo, db, vNodeSettings, this, forwardingProxy);
             _mainQueue = new QueuedHandler(_controller, "MainQueue");
-            
+
             _controller.SetMainQueue(_mainQueue);
 
             _subsystems = subsystems;
             //SELF
             _mainBus.Subscribe<SystemMessage.StateChangeMessage>(this);
             _mainBus.Subscribe<SystemMessage.BecomeShutdown>(this);
+            _mainBus.Subscribe<UserManagementMessage.UserManagementServiceInitialized>(this);
             // MONITORING
+            var monitoringServiceIODispatcher = new IODispatcher(_mainQueue, new PublishEnvelope(_mainQueue));
             var monitoringInnerBus = new InMemoryBus("MonitoringInnerBus", watchSlowMsg: false);
             var monitoringRequestBus = new InMemoryBus("MonitoringRequestBus", watchSlowMsg: false);
             var monitoringQueue = new QueuedHandlerThreadPool(monitoringInnerBus, "MonitoringQueue", true, TimeSpan.FromMilliseconds(100));
@@ -131,7 +133,8 @@ namespace EventStore.Core
                                                    db.Config.Path,
                                                    vNodeSettings.StatsPeriod,
                                                    _nodeInfo.ExternalHttp,
-                                                   vNodeSettings.StatsStorage);
+                                                   vNodeSettings.StatsStorage,
+                                                   monitoringServiceIODispatcher);
             _mainBus.Subscribe(monitoringQueue.WidenFrom<SystemMessage.SystemInit, Message>());
             _mainBus.Subscribe(monitoringQueue.WidenFrom<SystemMessage.StateChangeMessage, Message>());
             _mainBus.Subscribe(monitoringQueue.WidenFrom<SystemMessage.BecomeShuttingDown, Message>());
@@ -166,8 +169,8 @@ namespace EventStore.Core
                                             maxTablesPerLevel: 2,
                                             inMem: db.Config.InMemDb,
                                             indexCacheDepth: vNodeSettings.IndexCacheDepth);
-	        var hash = new XXHashUnsafe();
-			var readIndex = new ReadIndex(_mainQueue,
+            var hash = new XXHashUnsafe();
+            var readIndex = new ReadIndex(_mainQueue,
                                           readerPool,
                                           tableIndex,
                                           hash,
@@ -208,15 +211,15 @@ namespace EventStore.Core
                                                         Application.IsDefined(Application.AlwaysKeepScavenged),
                                                         mergeChunks: !vNodeSettings.DisableScavengeMerging);
 
-			// ReSharper disable RedundantTypeArgumentsOfMethod
+            // ReSharper disable RedundantTypeArgumentsOfMethod
             _mainBus.Subscribe<ClientMessage.ScavengeDatabase>(storageScavenger);
             // ReSharper restore RedundantTypeArgumentsOfMethod
 
             // AUTHENTICATION INFRASTRUCTURE - delegate to plugins
-	        _internalAuthenticationProvider = vNodeSettings.AuthenticationProviderFactory.BuildAuthenticationProvider(_mainQueue, _mainBus, _workersHandler, _workerBuses);
+            _internalAuthenticationProvider = vNodeSettings.AuthenticationProviderFactory.BuildAuthenticationProvider(_mainQueue, _mainBus, _workersHandler, _workerBuses);
 
             Ensure.NotNull(_internalAuthenticationProvider, "authenticationProvider");
-		
+
             {
                 // EXTERNAL TCP
                 var extTcpService = new TcpService(_mainQueue, _nodeInfo.ExternalTcp, _workersHandler,
@@ -238,8 +241,9 @@ namespace EventStore.Core
                     _mainBus.Subscribe<SystemMessage.SystemStart>(extSecTcpService);
                     _mainBus.Subscribe<SystemMessage.BecomeShuttingDown>(extSecTcpService);
                 }
-                if(!isSingleNode) {
-                // INTERNAL TCP
+                if (!isSingleNode)
+                {
+                    // INTERNAL TCP
                     var intTcpService = new TcpService(_mainQueue, _nodeInfo.InternalTcp, _workersHandler,
                                                       TcpServiceType.Internal, TcpSecurityType.Normal,
                                                     new InternalTcpDispatcher(),
@@ -249,7 +253,7 @@ namespace EventStore.Core
                     _mainBus.Subscribe<SystemMessage.SystemStart>(intTcpService);
                     _mainBus.Subscribe<SystemMessage.BecomeShuttingDown>(intTcpService);
 
-                // INTERNAL SECURE TCP
+                    // INTERNAL SECURE TCP
                     if (_nodeInfo.InternalSecureTcp != null)
                     {
                         var intSecTcpService = new TcpService(_mainQueue, _nodeInfo.InternalSecureTcp, _workersHandler,
@@ -312,14 +316,14 @@ namespace EventStore.Core
             _externalHttpService = new HttpService(ServiceAccessibility.Public, _mainQueue, new TrieUriRouter(),
                                                     _workersHandler, vNodeSettings.ExtHttpPrefixes);
             _externalHttpService.SetupController(persistentSubscriptionController);
-            if(vNodeSettings.AdminOnPublic)
+            if (vNodeSettings.AdminOnPublic)
                 _externalHttpService.SetupController(adminController);
             _externalHttpService.SetupController(pingController);
             _externalHttpService.SetupController(infoController);
-            if(vNodeSettings.StatsOnPublic)
+            if (vNodeSettings.StatsOnPublic)
                 _externalHttpService.SetupController(statController);
             _externalHttpService.SetupController(atomController);
-            if(vNodeSettings.GossipOnPublic)
+            if (vNodeSettings.GossipOnPublic)
                 _externalHttpService.SetupController(gossipController);
             _externalHttpService.SetupController(histogramController);
 
@@ -327,7 +331,8 @@ namespace EventStore.Core
             _mainBus.Subscribe<SystemMessage.BecomeShuttingDown>(_externalHttpService);
             _mainBus.Subscribe<HttpMessage.PurgeTimedOutRequests>(_externalHttpService);
             // INTERNAL HTTP
-            if(!isSingleNode) {
+            if (!isSingleNode)
+            {
                 _internalHttpService = new HttpService(ServiceAccessibility.Private, _mainQueue, new TrieUriRouter(),
                                                        _workersHandler, vNodeSettings.IntHttpPrefixes);
                 _internalHttpService.SetupController(adminController);
@@ -340,9 +345,10 @@ namespace EventStore.Core
                 _internalHttpService.SetupController(histogramController);
                 _internalHttpService.SetupController(persistentSubscriptionController);
             }
-			// Authentication plugin HTTP
-	        vNodeSettings.AuthenticationProviderFactory.RegisterHttpControllers(_externalHttpService, _internalHttpService, httpSendService, _mainQueue, _workersHandler);
-            if(_internalHttpService != null) {
+            // Authentication plugin HTTP
+            vNodeSettings.AuthenticationProviderFactory.RegisterHttpControllers(_externalHttpService, _internalHttpService, httpSendService, _mainQueue, _workersHandler);
+            if (_internalHttpService != null)
+            {
                 _mainBus.Subscribe<SystemMessage.SystemInit>(_internalHttpService);
                 _mainBus.Subscribe<SystemMessage.BecomeShuttingDown>(_internalHttpService);
                 _mainBus.Subscribe<HttpMessage.PurgeTimedOutRequests>(_internalHttpService);
@@ -472,8 +478,9 @@ namespace EventStore.Core
                                            vNodeSettings.GossipAdvertiseInfo.ExternalSecureTcp,
                                            vNodeSettings.GossipAdvertiseInfo.InternalHttp,
                                            vNodeSettings.GossipAdvertiseInfo.ExternalHttp);
-            if(!isSingleNode) {
-            // MASTER REPLICATION
+            if (!isSingleNode)
+            {
+                // MASTER REPLICATION
                 var masterReplicationService = new MasterReplicationService(_mainQueue, gossipInfo.InstanceId, db, _workersHandler,
                                                                         epochManager, vNodeSettings.ClusterNodeCount);
                 _mainBus.Subscribe<SystemMessage.SystemStart>(masterReplicationService);
@@ -500,11 +507,12 @@ namespace EventStore.Core
                                                         db.Config.WriterCheckpoint, db.Config.ChaserCheckpoint,
                                                         epochManager, () => readIndex.LastCommitPosition, vNodeSettings.NodePriority);
             electionsService.SubscribeMessages(_mainBus);
-            if(!isSingleNode) {
-            // GOSSIP
+            if (!isSingleNode)
+            {
+                // GOSSIP
 
                 var gossip = new NodeGossipService(_mainQueue, gossipSeedSource, gossipInfo, db.Config.WriterCheckpoint,
-			    								   db.Config.ChaserCheckpoint, epochManager, () => readIndex.LastCommitPosition,
+                                                   db.Config.ChaserCheckpoint, epochManager, () => readIndex.LastCommitPosition,
                                                    vNodeSettings.NodePriority, vNodeSettings.GossipInterval, vNodeSettings.GossipAllowedTimeDifference);
                 _mainBus.Subscribe<SystemMessage.SystemInit>(gossip);
                 _mainBus.Subscribe<GossipMessage.RetrieveGossipSeedSources>(gossip);
@@ -516,19 +524,20 @@ namespace EventStore.Core
                 _mainBus.Subscribe<SystemMessage.VNodeConnectionEstablished>(gossip);
                 _mainBus.Subscribe<SystemMessage.VNodeConnectionLost>(gossip);
             }
-            _workersHandler.Start();
-            _mainQueue.Start();
-            monitoringQueue.Start();
-            subscrQueue.Start();
 
             if (subsystems != null)
             {
                 foreach (var subsystem in subsystems)
                 {
-                    var http = isSingleNode ? new [] {_externalHttpService} : new [] {_internalHttpService, _externalHttpService};
+                    var http = isSingleNode ? new[] { _externalHttpService } : new[] { _internalHttpService, _externalHttpService };
                     subsystem.Register(new StandardComponents(db, _mainQueue, _mainBus, _timerService, _timeProvider, httpSendService, http, _workersHandler));
                 }
             }
+
+            _workersHandler.Start();
+            _mainQueue.Start();
+            monitoringQueue.Start();
+            subscrQueue.Start();
         }
 
         private void SubscribeWorkers(Action<InMemoryBus> setup)
@@ -539,13 +548,9 @@ namespace EventStore.Core
             }
         }
 
-        public void Start() 
+        public void Start()
         {
             _mainQueue.Publish(new SystemMessage.SystemInit());
-
-            if (_subsystems != null)
-                foreach (var subsystem in _subsystems)
-                    subsystem.Start();
         }
 
         public void StopNonblocking(bool exitProcess, bool shutdownHttp)
@@ -566,6 +571,19 @@ namespace EventStore.Core
         {
             StopNonblocking(exitProcess, shutdownHttp);
             return _shutdownEvent.WaitOne(timeout);
+        }
+
+        
+        private int _subSystemsStarted;
+        public void Handle(UserManagementMessage.UserManagementServiceInitialized message)
+        {
+            bool subSystemsAlreadyStarted = Interlocked.CompareExchange(ref _subSystemsStarted, 1, 0) == 1;
+            if (subSystemsAlreadyStarted) return;
+            if (_subsystems != null)
+                foreach (var subsystem in _subsystems)
+                    subsystem.Start();
+
+            _mainQueue.Publish(new SystemMessage.SystemReady());
         }
 
         public void Handle(SystemMessage.StateChangeMessage message)

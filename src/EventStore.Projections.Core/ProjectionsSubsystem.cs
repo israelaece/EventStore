@@ -8,6 +8,7 @@ using EventStore.Core.Messages;
 using EventStore.Core.Messaging;
 using EventStore.Core.Services.AwakeReaderService;
 using EventStore.Projections.Core.Messages;
+using EventStore.Common.Log;
 
 namespace EventStore.Projections.Core
 {
@@ -17,6 +18,7 @@ namespace EventStore.Projections.Core
         private readonly ProjectionType _runProjections;
         private readonly bool _startStandardProjections;
         public const int VERSION = 3;
+        private readonly ILogger _logger = LogManager.GetLoggerFor<ProjectionsSubsystem>();
 
         private QueuedHandler _masterInputQueue;
         private InMemoryBus _masterMainBus;
@@ -41,7 +43,8 @@ namespace EventStore.Projections.Core
             _masterInputQueue = new QueuedHandler(_masterMainBus, "Projections Master");
             _masterOutputBus = new InMemoryBus("ProjectionManagerAndCoreCoordinatorOutput");
 
-            var projectionsStandardComponents = new ProjectionsStandardComponents(
+            var _standardComponents = standardComponents;
+            var _projectionsStandardComponents = new ProjectionsStandardComponents(
                 _projectionWorkerThreadCount,
                 _runProjections,
                 _masterOutputBus,
@@ -49,11 +52,11 @@ namespace EventStore.Projections.Core
                 _masterMainBus);
 
             CreateAwakerService(standardComponents);
-            _coreQueues = ProjectionCoreWorkersNode.CreateCoreWorkers(standardComponents, projectionsStandardComponents);
+            _coreQueues = ProjectionCoreWorkersNode.CreateCoreWorkers(standardComponents, _projectionsStandardComponents);
             _queueMap = _coreQueues.ToDictionary(v => v.Key, v => (IPublisher)v.Value);
 
-            ProjectionManagerNode.CreateManagerService(standardComponents, projectionsStandardComponents, _queueMap);
-            projectionsStandardComponents.MasterMainBus.Subscribe<CoreProjectionStatusMessage.Stopped>(this);
+            ProjectionManagerNode.CreateManagerService(standardComponents, _projectionsStandardComponents, _queueMap);
+            _projectionsStandardComponents.MasterMainBus.Subscribe<CoreProjectionStatusMessage.Stopped>(this);
         }
 
         private static void CreateAwakerService(StandardComponents standardComponents)
